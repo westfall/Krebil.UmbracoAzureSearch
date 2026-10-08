@@ -26,6 +26,10 @@ public class AzureSearchSearcher(
 {
     private const int MaxOrderByClauses = 32;
 
+    // Field names go into the OData text unquoted, so only identifiers are accepted: anything else could end a clause.
+    private static readonly System.Text.RegularExpressions.Regex FieldNamePattern =
+        new("^[A-Za-z_][A-Za-z0-9_]*$", System.Text.RegularExpressions.RegexOptions.Compiled);
+
     public Task<SearchResult> SearchAsync(
         string indexAlias,
         string? query = null,
@@ -301,8 +305,15 @@ public class AzureSearchSearcher(
         return $"{IndexConstants.FieldNames.AccessKeys}/any(k: search.in(k, '{values}', ','))";
     }
 
+    private static void ValidateFieldName(string fieldName)
+    {
+        if (!FieldNamePattern.IsMatch(fieldName))
+            throw new ArgumentException($"'{fieldName}' is not a valid field name: letters, digits and underscores only.", nameof(fieldName));
+    }
+
     private static string BuildFilterClause(Filter filter)
     {
+        ValidateFieldName(filter.FieldName);
         return filter switch
         {
             KeywordAnyFilter keywordAnyFilter => BuildKeywordAnyFilter(keywordAnyFilter),
@@ -498,6 +509,8 @@ public class AzureSearchSearcher(
     private static string BuildSortClause(Sorter sorter)
     {
         var direction = sorter.Direction == Direction.Ascending ? "asc" : "desc";
+        if (sorter is not ScoreSorter)
+            ValidateFieldName(sorter.FieldName);
 
         return sorter switch
         {
@@ -513,6 +526,7 @@ public class AzureSearchSearcher(
 
     private static (string Expression, string FieldKey) BuildFacetExpression(Facet facet)
     {
+        ValidateFieldName(facet.FieldName);
         return facet switch
         {
             IntegerExactFacet f => ($"{f.FieldName}{IndexConstants.FieldTypePostfix.Integers},count:10000", $"{f.FieldName}{IndexConstants.FieldTypePostfix.Integers}"),
